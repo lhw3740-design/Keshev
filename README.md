@@ -20,6 +20,7 @@
 | AI 사건 설명 | 설명을 그 기록의 근거·규칙·확인 불가 상태와 대조해 표시 | `renderExplanation` (18단계) |
 | 조치 처리 상태 | 제안 → 사람 확인 → 서버 전달(ACK) → 효과 관측 구분 | `renderAction` (19단계) |
 | 사용 라이브러리 취약점 | lock 파일 기준 설치 버전과 OSV 결과, 미조회·일부 실패 구분 | `renderVulnerabilities` (20단계) |
+| 내 PC 상태 (마지막 총공세) | CPU·메모리·디스크 실측, 네트워크·방화벽·Windows 기록 건수 읽기 전용, 잰 시각·방법, 확인 불가 구분 | `renderStatus` 칸의 `createPcPanel` + 서버 학생 모듈 `src/student-pc/collector.mjs` |
 
 모든 학생 함수는 `on-client/student/extension.mjs` 한 파일에 있습니다.
 
@@ -56,6 +57,8 @@
 
 ## 빠른 실행
 
+처음 보는 사람용 한 장 안내: [on-client/docs/QUICKSTART.md](on-client/docs/QUICKSTART.md) · 시연 순서와 한계: [on-client/docs/FINAL_SHOWCASE.md](on-client/docs/FINAL_SHOWCASE.md)
+
 `on-client` 폴더에서 PowerShell을 열고:
 
 ```powershell
@@ -68,8 +71,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\tools\start-alekov.ps1
 
 | 구분 | 파일 |
 |---|---|
-| 학생 작성 | `on-client/student/extension.mjs`, `README.md`(이 파일), `on-client/docs/STUDENT_RUNBOOK.md`, `on-client/docs/REPRODUCTION_LOG.md`, `.gitignore` |
-| 제공(수정하지 않음) | `on-client/public/*`, `on-client/src/**`, `on-client/tools/*`, `on-client/vendor/*`, `on-client/student/engine-adapter.mjs`, `on-client/package.json`, `on-client/.env.example`, `on-client/README.md`, `on-client/docs/*`(STUDENT_RUNBOOK.md·REPRODUCTION_LOG.md 제외) |
+| 학생 작성 | `on-client/student/extension.mjs`, `on-client/src/student-pc/collector.mjs`, `README.md`(이 파일), `on-client/docs/STUDENT_RUNBOOK.md`, `on-client/docs/REPRODUCTION_LOG.md`, `on-client/docs/QUICKSTART.md`, `on-client/docs/FINAL_SHOWCASE.md`, `.gitignore` |
+| 제공 파일에 학생이 추가 | `on-client/src/server.mjs` — `// [학생 추가]` 로 표시한 import 1줄과 `GET /api/student/pc-status` 경로 1개만 추가 |
+| 제공(수정하지 않음) | `on-client/public/*`, `on-client/src/**`(위 server.mjs 추가분·student-pc 제외), `on-client/tools/*`, `on-client/vendor/*`, `on-client/student/engine-adapter.mjs`, `on-client/package.json`, `on-client/.env.example`, `on-client/README.md`, `on-client/docs/*`(학생 작성 문서 4개 제외) |
 
 참고: `on-client/public/app.js`는 13단계에 받은 시작 틀 판본 그대로이며, 0.2.14 판본과 AI 요청 제한 시간 처리(이 판본은 모든 요청 10초)와 `WB_CLCO_ACCESS_BLOCKED` 안내 문구가 다릅니다. 나머지 제공 파일은 0.2.14 시작 틀에서 그대로 가져왔습니다.
 
