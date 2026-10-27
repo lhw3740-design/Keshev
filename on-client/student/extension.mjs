@@ -1,6 +1,211 @@
 // 이 파일은 학생이 같은 프로젝트에서 이어서 구현합니다.
 // 제공 UI를 받은 것만으로 단계 완료를 인정하지 않습니다.
+
+// ---------- 마지막 총공세: 내 PC 상태(학생 작성) ----------
+// 서버의 학생 모듈(src/student-pc/collector.mjs)이 이 PC에서 실제로 잰 값만 보여 준다. 예시 값은 쓰지 않는다.
+// 사용자가 버튼을 눌렀을 때만 조회하고(자동 반복 없음), 늦게 도착한 이전 응답은 세대 번호로 버린다.
+const PC_TIMEOUT_MS = 9000;
+function createPcPanel() {
+  let state = { status: 'idle' };
+  let generation = 0;
+  let controller = null;
+  const element = document.createElement('section');
+  element.className = 'student-pc';
+  element.setAttribute('aria-labelledby', 'student-pc-title');
+
+  const text = (value, fallback = '확인 불가') => (typeof value === 'string' && value.trim() ? value.trim().slice(0, 200) : fallback);
+  const fmtBytes = (n) => {
+    if (!Number.isFinite(n) || n < 0) return '확인 불가';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0; let v = n;
+    while (v >= 1024 && i < units.length - 1) { v /= 1024; i += 1; }
+    return `${v.toFixed(i >= 3 ? 1 : 0)} ${units[i]}`;
+  };
+  const fmtTime = (iso) => {
+    const d = new Date(iso);
+    return Number.isFinite(d.getTime()) ? `${d.toLocaleString('ko-KR', { hour12: false })} (${iso})` : '확인 불가';
+  };
+  const line = (parent, label, value, className = '') => {
+    const p = document.createElement('p');
+    if (className) p.className = className;
+    const strong = document.createElement('strong');
+    strong.textContent = `${label}: `;
+    const span = document.createElement('span');
+    span.textContent = value;
+    p.append(strong, span);
+    parent.append(p);
+    return p;
+  };
+  const note = (parent, message, className = 'muted', role = null) => {
+    const p = document.createElement('p');
+    p.className = className;
+    if (role) p.setAttribute('role', role);
+    p.textContent = message;
+    parent.append(p);
+  };
+  const card = (title, item, renderOk) => {
+    const box = document.createElement('section');
+    box.className = 'student-pc-item';
+    const h = document.createElement('h5');
+    h.textContent = title;
+    box.append(h);
+    if (item?.status === 'ok') {
+      const level = renderOk(box, item) || 'ok';
+      const badge = level === 'warn' ? '▲ 주의' : '● 정상';
+      box.setAttribute('data-student-pc-level', level);
+      h.textContent = `${title} · ${badge} · 실측`;
+      line(box, '잰 시각', fmtTime(item.measuredAt), 'muted');
+      line(box, '잰 방법', text(item.method), 'muted');
+    } else {
+      box.setAttribute('data-student-pc-level', 'unavailable');
+      h.textContent = `${title} · ? 확인 불가`;
+      line(box, '이유', `${text(item?.message, '값을 읽지 못했습니다.')} (${text(item?.code, 'UNKNOWN')})`, 'state state-error');
+      note(box, '확인 불가는 값을 읽지 못했다는 뜻이며, 정상이나 0으로 보지 않습니다.');
+    }
+    return box;
+  };
+
+  function render() {
+    element.replaceChildren();
+    element.setAttribute('data-student-pc-status', state.status);
+    const title = document.createElement('h4');
+    title.id = 'student-pc-title';
+    title.textContent = '내 PC 상태 (이 PC에서 실제로 잰 값)';
+    element.append(title);
+    note(element, '앱 서버가 이 PC에서 읽기 전용으로 잰 값입니다. 설명용 예시 값은 표시하지 않으며, 읽지 못한 항목은 「확인 불가」로 남깁니다.');
+
+    const controls = document.createElement('div');
+    controls.className = 'student-pc-controls';
+    const load = document.createElement('button');
+    load.type = 'button';
+    load.textContent = state.status === 'idle' ? '내 PC 상태 조회' : '다시 조회';
+    load.setAttribute('aria-label', load.textContent);
+    load.disabled = state.status === 'loading';
+    load.addEventListener('click', () => { refresh(); });
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = '조회 취소';
+    cancel.disabled = state.status !== 'loading';
+    cancel.addEventListener('click', () => { cancelRefresh(); });
+    controls.append(load, cancel);
+    element.append(controls);
+
+    if (state.status === 'idle') {
+      note(element, '아직 조회하지 않았습니다. 「내 PC 상태 조회」를 누르면 한 번 잽니다. 자동으로 반복 조회하지 않습니다.', 'state state-empty', 'status');
+      return;
+    }
+    if (state.status === 'loading') {
+      note(element, '이 PC 상태를 재는 중입니다… (최대 약 9초) 이전 결과는 현재 값이 아니므로 표시하지 않습니다.', 'state state-loading', 'status');
+      return;
+    }
+    if (state.status === 'error') {
+      note(element, `조회 실패: ${text(state.error?.message, '내 PC 상태를 가져오지 못했습니다.')} (${text(state.error?.code, 'UNKNOWN')})`, 'state state-error', 'alert');
+      const steps = document.createElement('ol');
+      for (const step of ['앱을 켠 PowerShell 창이 아직 열려 있는지 확인합니다.', '창에 오류가 보이면 그 메시지를 확인합니다.', '「다시 조회」를 직접 누릅니다. 계속 실패하면 도움정보와 함께 담당자에게 알립니다.']) {
+        const li = document.createElement('li'); li.textContent = step; steps.append(li);
+      }
+      element.append(steps);
+      note(element, '조회 실패는 PC가 정상이라는 뜻도, 문제가 있다는 뜻도 아닙니다.');
+      return;
+    }
+
+    const data = state.data;
+    line(element, '조회 시작~끝', `${fmtTime(data.startedAt)} ~ ${fmtTime(data.finishedAt)}`, 'muted');
+    if (data.hostKind !== 'windows') note(element, 'Windows 가 아닌 환경이라 방화벽·이벤트 등 일부 항목은 읽지 않습니다.', 'state state-error');
+    const grid = document.createElement('div');
+    grid.className = 'student-pc-grid';
+    const items = data.items || {};
+
+    grid.append(card('CPU', items.cpu, (box, it) => {
+      line(box, '사용률', `${it.usagePercent}%`);
+      line(box, '논리 코어', String(it.logicalCores));
+      line(box, '모델', text(it.model));
+      return it.usagePercent >= 90 ? 'warn' : 'ok';
+    }));
+    grid.append(card('메모리', items.memory, (box, it) => {
+      line(box, '사용 중', `${fmtBytes(it.usedBytes)} / ${fmtBytes(it.totalBytes)} (${it.usagePercent}%)`);
+      line(box, '남은 양', fmtBytes(it.freeBytes));
+      return it.usagePercent >= 90 ? 'warn' : 'ok';
+    }));
+    grid.append(card('디스크', items.disk, (box, it) => {
+      line(box, '드라이브', text(it.drive));
+      line(box, '남은 공간', `${fmtBytes(it.freeBytes)} / ${fmtBytes(it.totalBytes)} (${it.freePercent}%)`);
+      return it.freePercent < 10 ? 'warn' : 'ok';
+    }));
+    grid.append(card('네트워크', items.network, (box, it) => {
+      const adapters = Array.isArray(it.adapters) ? it.adapters : [];
+      line(box, '사용 중 어댑터', adapters.length ? adapters.map((a) => `${text(a.name)}(${a.ipv4 ? 'IPv4' : ''}${a.ipv4 && a.ipv6 ? '·' : ''}${a.ipv6 ? 'IPv6' : ''})`).join(', ') : '없음');
+      if (Array.isArray(it.profiles)) {
+        line(box, '연결 프로필', it.profiles.length ? it.profiles.map((p) => `${text(p.alias)}: ${text(p.category)} · IPv4 ${text(p.ipv4)}`).join(' / ') : '없음');
+      } else {
+        line(box, '연결 프로필', `확인 불가 (${text(it.profileCode, 'UNKNOWN')})`, 'state state-error');
+      }
+      const online = Array.isArray(it.profiles) && it.profiles.some((p) => p.ipv4 === 'Internet' || p.ipv6 === 'Internet');
+      return online ? 'ok' : 'warn';
+    }));
+    grid.append(card('방화벽', items.firewall, (box, it) => {
+      const profiles = Array.isArray(it.profiles) ? it.profiles : [];
+      const label = (v) => (v === 'True' ? '켜짐' : v === 'False' ? '꺼짐' : `확인 불가(${text(v, '값 없음')})`);
+      for (const p of profiles) line(box, `${text(p.name)} 프로필`, label(p.enabled));
+      return profiles.some((p) => p.enabled !== 'True') ? 'warn' : 'ok';
+    }));
+    grid.append(card(`Windows 기록 경고·오류 (최근 ${Number(items.events?.windowHours) || 24}시간)`, items.events, (box, it) => {
+      let warn = false;
+      for (const log of Array.isArray(it.logs) ? it.logs : []) {
+        if (log.status === 'ok') {
+          line(box, `${text(log.log)} 로그`, `오류 ${log.errors}건 · 경고 ${log.warnings}건${log.capped ? ' (상한까지만 셈, 실제는 더 많을 수 있음)' : ''}`);
+          if (log.errors > 0) warn = true;
+        } else {
+          line(box, `${text(log.log)} 로그`, `확인 불가 (${text(log.code, 'UNKNOWN')})`, 'state state-error');
+        }
+      }
+      note(box, '건수만 셉니다. 이벤트 본문은 읽어 오거나 보여 주지 않습니다.');
+      return warn ? 'warn' : 'ok';
+    }));
+    element.append(grid);
+    note(element, '▲ 주의 기준(학생이 정한 값): CPU·메모리 90% 이상, 디스크 남은 공간 10% 미만, 꺼진 방화벽 프로필, 인터넷 연결 프로필 없음, 기록 오류 1건 이상. 주의는 점검을 권하는 표시이며 장애 판정이 아닙니다.');
+  }
+
+  async function refresh() {
+    const gen = ++generation;
+    controller?.abort();
+    const ctrl = new AbortController();
+    controller = ctrl;
+    const timer = setTimeout(() => ctrl.abort(), PC_TIMEOUT_MS);
+    state = { status: 'loading' };
+    render();
+    let next;
+    try {
+      const response = await fetch('/api/student/pc-status', { headers: { accept: 'application/json' }, cache: 'no-store', signal: ctrl.signal });
+      const body = await response.json().catch(() => null);
+      if (response.ok && body?.ok === true && body.data && typeof body.data === 'object' && body.data.items) {
+        next = { status: 'ok', data: body.data };
+      } else {
+        next = { status: 'error', error: { code: text(body?.error?.code, `HTTP_${response.status}`), message: text(body?.error?.message, '서버가 내 PC 상태를 돌려주지 않았습니다.') } };
+      }
+    } catch (error) {
+      next = error?.name === 'AbortError'
+        ? { status: 'error', error: ctrl.cancelledByUser ? { code: 'CANCELLED', message: '조회를 취소했습니다. 이전 결과는 현재 값이 아닙니다.' } : { code: 'TIMEOUT', message: '조회 시간이 초과됐습니다.' } }
+        : { status: 'error', error: { code: 'NETWORK_ERROR', message: '앱 서버에 연결할 수 없습니다.' } };
+    } finally {
+      clearTimeout(timer);
+    }
+    if (gen !== generation) return; // 더 새 조회나 취소가 있으면 늦은 응답은 버린다.
+    controller = null;
+    state = next;
+    render();
+  }
+  function cancelRefresh() {
+    if (!controller) return;
+    controller.cancelledByUser = true;
+    controller.abort();
+  }
+
+  render();
+  return { element };
+}
+
 export function createStudentView() {
+  const pcPanel = createPcPanel();
   return {
     renderIdentity({ me, devices, sessions } = {}) {
       const root = document.createElement('section');
@@ -626,6 +831,8 @@ export function createStudentView() {
       });
       diagnosticsGroup.append(copyButton, copyStatus);
       root.append(diagnosticsGroup);
+      // 마지막 총공세: 같은 칸에 내 PC 상태 패널을 붙인다(패널 상태는 다시 그려도 유지).
+      root.append(pcPanel.element);
       return root;
     },
     // 20단계: package-lock.json 기준 실제 설치 버전과 OSV 조회 결과를 대조해 표시한다.

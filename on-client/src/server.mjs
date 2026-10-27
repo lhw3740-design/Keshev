@@ -18,6 +18,8 @@ import {createConnectionManager} from './connection/manager.mjs';
 import {createProjectScanner} from './vulnerabilities/project-scan.mjs';
 import {buildLocalLearnerSupportGuide,isLearnerSupportProblemKind,readLocalLearnerSupportObservation} from './learner-support/service.mjs';
 import {nativeOwn,nativePublicError} from './connection/native-login.mjs';
+// [학생 추가] 마지막 총공세: 이 PC 상태를 읽기 전용으로 재는 학생 모듈(src/student-pc/collector.mjs).
+import {collectPcStatus} from './student-pc/collector.mjs';
 import {createNativeHostContext,captureNativeHostConfiguration,readNativeHostConfiguration,openNativeHostOperation,readNativeHostOperation,assertNativeHostOperation,createNativeOperationVault,closeNativeHostOperation} from './connection/native-context.mjs';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
@@ -694,6 +696,11 @@ export function createOnServer(serverOptions={}) {
         const info=(mappedAi??defaultAi).connectionInfo();
         send(200,{ok:true,data:{requestId,component:'on-client',version:'0.1.0',engine:{mode,code:mode==='disconnected'?'ENGINE_NOT_CONNECTED':mode==='demo'?'DEMO_ONLY':'ADAPTER_CONFIGURED'},
           ai:{configured:info?.configured===true,authorized:false,authorizationRequired:true},checkedAt:clock().toISOString(),workbenchRequiredAtRuntime:false}});return;
+      }
+      // [학생 추가] 내 PC 상태(CPU·메모리·디스크·네트워크·방화벽·이벤트 건수) 읽기 전용 조회. 사용자가 버튼을 눌렀을 때만 호출된다.
+      if(req.method==='GET'&&url.pathname==='/api/student/pc-status'){
+        const data=await collectPcStatus({signal:lifetime.signal});send(200,{ok:true,data});
+        return;
       }
       if(req.method==='GET'&&url.pathname==='/api/vulnerabilities'){
         const data=await bounded(signal=>scanner.scan({signal}));send(200,{ok:true,data});
