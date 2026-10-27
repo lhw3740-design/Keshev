@@ -967,6 +967,146 @@ export function createStudentView() {
       addMessage(root, 'AI 설명과 제안만으로는 어떤 보안 조치도 실행되지 않습니다.', null, 'muted');
       return root;
     },
-    renderAction() { return '학생 구현 대기: 현재 사건·조치·실제 대상·사람 확인·ACK와 원천 효과·unknown을 구분하세요.'; },
+    // 19단계: AI 제안 → 사람 확인 → 서버 전달(ACK) → 연동 시스템 효과 관측을 구분해 표시한다.
+    // 학생 함수는 표시만 한다. 조치 버튼·POST 요청·확인 티켓을 만들거나 저장하지 않으며,
+    // 매 호출마다 새 요소를 만들어 반환하므로 새 입력이 오면 이전 대상·요청·결과 표시는 남지 않는다.
+    renderAction({ status = 'idle', event = null, actionId = null, target = null, receipt = null,
+      observation = null, message = '', confirmationExpiresAt = null, error = null } = {}) {
+      const root = document.createElement('section');
+      root.className = 'student-action';
+
+      const heading = document.createElement('h3');
+      heading.textContent = '보안 조치 처리 상태';
+      root.append(heading);
+
+      const safeText = (value, fallback = '확인 불가') => {
+        if (typeof value !== 'string' || value.trim().length === 0) return fallback;
+        return value.slice(0, 500)
+          .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, ' ')
+          .replace(/\bBearer\s+[A-Za-z0-9._~+/-]+=*/gi, '[비밀값 제거]')
+          .replace(/\bac-on-[A-Za-z0-9_-]{8,}/g, '[확인 값 제거]')
+          .replace(/\b(?:github_pat_|gh[pousr]_|sk-(?:proj-|ant-|svcacct-)?)[A-Za-z0-9_-]{8,}\b/gi, '[비밀값 제거]')
+          .replace(/\b(?:api[_ -]?key|authorization|password|비밀번호|토큰)\s*[:=]\s*[^\s,;]+/gi, '[비밀값 제거]')
+          .trim() || fallback;
+      };
+      const isId = (value) => typeof value === 'string' && value.length > 0;
+      const addMessage = (text, role = 'status', className = '') => {
+        const line = document.createElement('p');
+        if (role) line.setAttribute('role', role);
+        if (className) line.className = className;
+        line.textContent = text;
+        root.append(line);
+      };
+      const addLine = (labelText, value) => {
+        const line = document.createElement('p');
+        const label = document.createElement('strong');
+        label.textContent = `${labelText}: `;
+        const detail = document.createElement('span');
+        detail.textContent = value;
+        line.append(label, detail);
+        root.append(line);
+      };
+      const retryResultOnly = '제공 화면의 「연동 시스템 결과만 재조회」를 직접 누르세요. 조치를 다시 집행하지 마세요.';
+
+      // 1) 결과가 현재 사건·조치와 묶여 있는지 확인한다. 다른 사건·조치의 결과는 현재 결과로 쓰지 않는다.
+      const eventId = isId(event?.id) ? event.id : null;
+      const receiptMismatch = receipt && typeof receipt === 'object' && (
+        (isId(receipt.eventId) && eventId && receipt.eventId !== eventId)
+        || (isId(receipt.actionId) && isId(actionId) && receipt.actionId !== actionId));
+      if (receiptMismatch) {
+        addMessage('확인 불가: 받은 처리 결과가 현재 사건·조치와 맞지 않습니다. 이전 사건의 결과를 현재 결과로 표시하지 않습니다.', 'alert', 'state state-error');
+        addMessage('현재 기록에서 조치를 다시 준비하거나 결과만 재조회하세요.', null, 'muted');
+        return root;
+      }
+
+      // 2) 상태별 문장. 서버 접수(ACK)와 실제 효과를 구분한다.
+      const effectConfirmed = status === 'succeeded' && observation?.effectApplied === true;
+      const statusText = {
+        idle: '아직 미실행(idle): 조치를 준비하거나 집행하지 않았습니다.',
+        loading: '조치 준비 또는 결과 조회 중(loading) · 완료 아님. 아직 아무 효과도 확인되지 않았습니다.',
+        prepared: '준비됨·미실행(prepared): 실제 대상과 확인 기한을 확인한 뒤, 사람이 제공 화면의 「대상과 조치를 확인했으며 집행합니다」를 직접 눌러야 서버에 전달됩니다.',
+        executing: '서버에 전달 중(executing) · 완료 아님. 아직 처리 결과가 없습니다. 같은 집행 버튼을 다시 누르지 마세요.',
+        pending: '서버 접수·처리 중(pending) · 완료 아님. 서버가 요청을 받았다는 응답(ACK)은 실제 효과가 아닙니다.',
+        denied: '거절(denied): 연동 시스템이 이 조치를 허용하지 않았습니다. 효과는 적용되지 않았습니다.',
+        failed: '실패(failed): 연동 시스템이 조치를 처리하지 못했습니다.',
+        unknown: '결과 불명(unknown): 성공으로도, 효과 없음으로도 판단하지 마세요. 이미 전달된 조치일 수 있습니다.',
+        expired: '확인 기한 지남(expired): 이번 준비로는 집행할 수 없습니다. 현재 기록에서 조치를 다시 준비하세요.',
+        error: '요청 처리 안 됨(error): 조치 요청이 처리되지 않았습니다.',
+      };
+      let shownStatus = status;
+      if (status === 'succeeded' && !effectConfirmed) shownStatus = 'unknown';
+
+      if (status === 'succeeded' && effectConfirmed) {
+        addMessage('효과 확인(succeeded): 연동 시스템이 조치 효과를 관측했습니다.', 'status', 'state state-ok');
+      } else if (status === 'succeeded') {
+        addMessage('결과 불명(unknown): succeeded 응답에 효과 관측(effectApplied: true)이 없어 성공으로 표시하지 않습니다.', 'alert', 'state state-error');
+      } else if (Object.hasOwn(statusText, status)) {
+        const isProblem = ['denied', 'failed', 'unknown', 'expired', 'error'].includes(status);
+        addMessage(statusText[status], isProblem ? 'alert' : 'status', isProblem ? 'state state-error' : '');
+      } else {
+        shownStatus = 'unknown';
+        addMessage(`결과 불명(unknown; 원래 값: ${safeText(String(status), 'unknown')}): 상태를 확인할 수 없습니다. 성공이나 효과 없음으로 판단하지 마세요.`, 'alert', 'state state-error');
+      }
+      addLine('상태 원래 값(status)', safeText(String(status), 'unknown'));
+
+      // 3) 현재 사건·근거·조치·대상·요청 식별 값(받은 것만).
+      if (eventId) addLine('사건 ID(event.id)', eventId);
+      const evidenceIds = Array.isArray(event?.evidence) ? event.evidence.map((row) => row?.id).filter(isId) : [];
+      if (evidenceIds.length > 0) addLine('근거 ID', evidenceIds.join(', '));
+      if (isId(actionId)) addLine('조치(actionId)', actionId);
+      if (target && typeof target === 'object') {
+        if (isId(target.id)) addLine('실제 대상(target.id)', safeText(target.id));
+        if (Number.isSafeInteger(target.generation)) addLine('대상 세대(target.generation)', String(target.generation));
+      }
+      if (status === 'prepared' && confirmationExpiresAt) addLine('사람 확인 기한(confirmationExpiresAt)', safeText(confirmationExpiresAt));
+      if (receipt && typeof receipt === 'object') {
+        if (isId(receipt.requestId)) addLine('요청 ID(receipt.requestId)', safeText(receipt.requestId));
+        if (isId(receipt.receiptId)) addLine('영수증 ID(receipt.receiptId)', safeText(receipt.receiptId));
+        if (Number.isSafeInteger(receipt.version)) addLine('버전(receipt.version)', String(receipt.version));
+        // 중복 집행 방지: 같은 요청을 다시 보내면 서버는 새로 실행하지 않고 기존 결과를 돌려준다(replayed).
+        if (receipt.replayed === true) {
+          addMessage('같은 요청 ID에 대한 기존 처리 결과입니다(replayed). 조치가 한 번 더 실행된 것이 아닙니다.', null, 'muted');
+        }
+        if (receipt.superseded === true) {
+          addMessage('이전 조회 결과는 최신 결과를 대신하지 않습니다(superseded). 결과만 다시 조회하세요.', null, 'muted');
+        }
+      }
+
+      // 4) 효과 관측 정보. succeeded + effectApplied:true 일 때만 효과 확인으로 쓴다.
+      if (effectConfirmed) {
+        addLine('관측 시각(observation.observedAt)', safeText(observation.observedAt));
+        addLine('효과 적용', 'effectApplied: true');
+      } else if (observation && typeof observation === 'object') {
+        addLine('관측 시각(observation.observedAt)', safeText(observation.observedAt));
+        addLine('효과 적용', `effectApplied: ${observation.effectApplied === true ? 'true' : observation.effectApplied === false ? 'false' : '확인 불가'}`);
+      }
+
+      // 5) 상태별 다음 행동 안내. 학생 화면에는 버튼을 만들지 않는다.
+      if (['executing', 'pending', 'unknown'].includes(shownStatus) || (status === 'succeeded' && !effectConfirmed)) {
+        addMessage(`결과는 아직 확인되지 않았습니다. ${retryResultOnly}`, null, 'muted');
+      }
+      if (['executing', 'pending', 'prepared'].includes(shownStatus)) {
+        addMessage('중복 집행 방지: 집행 버튼을 반복해서 누르지 마세요. 같은 요청은 한 번만 처리됩니다.', null, 'muted');
+      }
+      if (status === 'error' || status === 'expired' || status === 'denied' || status === 'failed') {
+        const code = safeText(error?.code, '');
+        if (code) addLine('오류 코드', code);
+        const detail = safeText(error?.message, '') || safeText(message, '');
+        if (detail) addLine('안내 메시지', detail);
+      } else if (isId(message) && shownStatus === 'idle') {
+        addMessage(safeText(message), null, 'muted');
+      }
+      if (shownStatus === 'idle') {
+        addMessage('조치는 AI 제안만으로 실행되지 않습니다. 현재 기록의 supportedActions가 비어 있으면 조치 준비 버튼이 나오지 않는 것이 정상입니다.', null, 'muted');
+      }
+      addMessage('「조치 화면 취소」는 이미 서버에 전달된 조치의 효과를 되돌리지 않습니다. 조작은 제공 화면 버튼으로만 합니다.', null, 'muted');
+
+      // 6) 현재 사건과 요청이 확인된 화면에만 식별 속성을 붙인다.
+      if (eventId && isId(receipt?.requestId)) {
+        root.setAttribute('data-student-action-event', eventId);
+        root.setAttribute('data-student-action-request', receipt.requestId);
+      }
+      return root;
+    },
   };
 }
