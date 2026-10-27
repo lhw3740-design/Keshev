@@ -45,12 +45,12 @@
 | 항목 | 값 | 근거 |
 |---|---|---|
 | 운영체제 | Windows + PowerShell | 실행 도구 `on-client/tools/start-alekov.ps1` |
-| Node.js | 22~24, 검수 기준 24.19.0 | `on-client/package.json` 의 `engines.node`, 실행 도구의 버전 검사 |
+| Node.js | 22~24, 검수 기준 24.19.0 (내 PC: v24.22.0) | `on-client/package.json` 의 `engines.node`, 실행 도구의 버전 검사 |
 | 외부 npm 의존성 | 없음 (`package.json`에 dependencies 없음, lock 파일 없음) | `on-client/package.json` |
 | 시작 틀 | `alekov-client-starter` 0.2.14 의 제공 파일 + 학생 파일 | `on-client/package.json` 의 `name`·`version` |
 | 기본 주소 | `http://127.0.0.1:5189/` (`ON_PORT`, 실행 도구 `-Port`) | `on-client/.env.example`, 실행 도구 |
 
-내 PC에서 실제로 확인한 것: 워크벤치 프로젝트에서 `tools\start-alekov.ps1`로 앱을 켜서 화면을 열어 봤습니다. 그때 쓴 Node.js 정확한 버전은 기록해 두지 않아 **미확인**입니다.
+내 PC에서 실제로 확인한 것: 워크벤치 프로젝트에서 `tools\start-alekov.ps1`로 앱을 켜서 화면을 열어 봤습니다. 내 PC의 Node.js 는 `node -v` 결과 **v24.22.0** 입니다. 실행 도구가 허용하는 22~24 범위 안이며, 수업 기준(v24.19.0)과 달라 실행 도구가 `참고: 지금 Node.js 는 v24.22.0 입니다. 수업 기준은 v24.19.0 입니다.` 안내를 함께 출력합니다(실행은 계속됨).
 
 ## 빠른 실행
 
