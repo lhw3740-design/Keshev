@@ -42,24 +42,39 @@ function createPcPanel() {
     p.textContent = message;
     parent.append(p);
   };
+  // 대시보드 타일: 제목·상태 배지·큰 값 하나를 먼저 보여 주고, 세부 값과 잰 시각·방법은 접어 둔다.
   const card = (title, item, renderOk) => {
     const box = document.createElement('section');
     box.className = 'student-pc-item';
+    Object.assign(box.style, { border: '1px solid currentColor', borderRadius: '10px', padding: '10px 12px', minWidth: '0' });
     const h = document.createElement('h5');
-    h.textContent = title;
+    h.style.margin = '0 0 6px';
     box.append(h);
     if (item?.status === 'ok') {
-      const level = renderOk(box, item) || 'ok';
+      const details = document.createElement('details');
+      const summary = document.createElement('summary');
+      summary.textContent = '자세히 · 잰 시각·방법';
+      details.append(summary);
+      const { level = 'ok', headline = '' } = renderOk(details, item) || {};
       const badge = level === 'warn' ? '▲ 주의' : '● 정상';
       box.setAttribute('data-student-pc-level', level);
       h.textContent = `${title} · ${badge} · 실측`;
-      line(box, '잰 시각', fmtTime(item.measuredAt), 'muted');
-      line(box, '잰 방법', text(item.method), 'muted');
+      const big = document.createElement('p');
+      big.className = 'student-pc-headline';
+      Object.assign(big.style, { fontSize: '1.5rem', fontWeight: '700', margin: '0 0 6px' });
+      big.textContent = headline;
+      line(details, '잰 시각', fmtTime(item.measuredAt), 'muted');
+      line(details, '잰 방법', text(item.method), 'muted');
+      box.append(big, details);
     } else {
       box.setAttribute('data-student-pc-level', 'unavailable');
       h.textContent = `${title} · ? 확인 불가`;
+      const big = document.createElement('p');
+      Object.assign(big.style, { fontSize: '1.5rem', fontWeight: '700', margin: '0 0 6px' });
+      big.textContent = '확인 불가';
+      box.append(big);
       line(box, '이유', `${text(item?.message, '값을 읽지 못했습니다.')} (${text(item?.code, 'UNKNOWN')})`, 'state state-error');
-      note(box, '확인 불가는 값을 읽지 못했다는 뜻이며, 정상이나 0으로 보지 않습니다.');
+      note(box, '값을 읽지 못했다는 뜻이며, 정상이나 0으로 보지 않습니다.');
     }
     return box;
   };
@@ -98,6 +113,10 @@ function createPcPanel() {
       return;
     }
     if (state.status === 'error') {
+      if (state.error?.code === 'CANCELLED') {
+        note(element, '조회 취소됨: 이번 조회를 멈췄습니다. 이전 결과는 현재 값이 아니므로 표시하지 않습니다. 필요하면 「다시 조회」를 누르세요.', 'state state-empty', 'status');
+        return;
+      }
       note(element, `조회 실패: ${text(state.error?.message, '내 PC 상태를 가져오지 못했습니다.')} (${text(state.error?.code, 'UNKNOWN')})`, 'state state-error', 'alert');
       const steps = document.createElement('ol');
       for (const step of ['앱을 켠 PowerShell 창이 아직 열려 있는지 확인합니다.', '창에 오류가 보이면 그 메시지를 확인합니다.', '「다시 조회」를 직접 누릅니다. 계속 실패하면 도움정보와 함께 담당자에게 알립니다.']) {
@@ -113,23 +132,23 @@ function createPcPanel() {
     if (data.hostKind !== 'windows') note(element, 'Windows 가 아닌 환경이라 방화벽·이벤트 등 일부 항목은 읽지 않습니다.', 'state state-error');
     const grid = document.createElement('div');
     grid.className = 'student-pc-grid';
+    Object.assign(grid.style, { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '10px', margin: '8px 0' });
     const items = data.items || {};
 
     grid.append(card('CPU', items.cpu, (box, it) => {
-      line(box, '사용률', `${it.usagePercent}%`);
       line(box, '논리 코어', String(it.logicalCores));
       line(box, '모델', text(it.model));
-      return it.usagePercent >= 90 ? 'warn' : 'ok';
+      return { level: it.usagePercent >= 90 ? 'warn' : 'ok', headline: `사용률 ${it.usagePercent}%` };
     }));
     grid.append(card('메모리', items.memory, (box, it) => {
-      line(box, '사용 중', `${fmtBytes(it.usedBytes)} / ${fmtBytes(it.totalBytes)} (${it.usagePercent}%)`);
+      line(box, '사용 중', `${fmtBytes(it.usedBytes)} / ${fmtBytes(it.totalBytes)}`);
       line(box, '남은 양', fmtBytes(it.freeBytes));
-      return it.usagePercent >= 90 ? 'warn' : 'ok';
+      return { level: it.usagePercent >= 90 ? 'warn' : 'ok', headline: `사용 ${it.usagePercent}%` };
     }));
     grid.append(card('디스크', items.disk, (box, it) => {
       line(box, '드라이브', text(it.drive));
-      line(box, '남은 공간', `${fmtBytes(it.freeBytes)} / ${fmtBytes(it.totalBytes)} (${it.freePercent}%)`);
-      return it.freePercent < 10 ? 'warn' : 'ok';
+      line(box, '남은 공간', `${fmtBytes(it.freeBytes)} / ${fmtBytes(it.totalBytes)}`);
+      return { level: it.freePercent < 10 ? 'warn' : 'ok', headline: `${text(it.drive)} 남음 ${it.freePercent}%` };
     }));
     grid.append(card('네트워크', items.network, (box, it) => {
       const adapters = Array.isArray(it.adapters) ? it.adapters : [];
@@ -140,15 +159,17 @@ function createPcPanel() {
         line(box, '연결 프로필', `확인 불가 (${text(it.profileCode, 'UNKNOWN')})`, 'state state-error');
       }
       const online = Array.isArray(it.profiles) && it.profiles.some((p) => p.ipv4 === 'Internet' || p.ipv6 === 'Internet');
-      return online ? 'ok' : 'warn';
+      const known = Array.isArray(it.profiles);
+      return { level: online ? 'ok' : 'warn', headline: online ? '인터넷 연결됨' : known ? '인터넷 연결 없음' : '연결 프로필 확인 불가' };
     }));
     grid.append(card('방화벽', items.firewall, (box, it) => {
       const profiles = Array.isArray(it.profiles) ? it.profiles : [];
       const label = (v) => (v === 'True' ? '켜짐' : v === 'False' ? '꺼짐' : `확인 불가(${text(v, '값 없음')})`);
       for (const p of profiles) line(box, `${text(p.name)} 프로필`, label(p.enabled));
-      return profiles.some((p) => p.enabled !== 'True') ? 'warn' : 'ok';
+      const on = profiles.filter((p) => p.enabled === 'True').length;
+      return { level: on === profiles.length ? 'ok' : 'warn', headline: `${profiles.length}개 중 ${on}개 켜짐` };
     }));
-    grid.append(card(`Windows 기록 경고·오류 (최근 ${Number(items.events?.windowHours) || 24}시간)`, items.events, (box, it) => {
+    grid.append(card(`Windows 기록 (최근 ${Number(items.events?.windowHours) || 24}시간)`, items.events, (box, it) => {
       let warn = false;
       for (const log of Array.isArray(it.logs) ? it.logs : []) {
         if (log.status === 'ok') {
@@ -159,7 +180,10 @@ function createPcPanel() {
         }
       }
       note(box, '건수만 셉니다. 이벤트 본문은 읽어 오거나 보여 주지 않습니다.');
-      return warn ? 'warn' : 'ok';
+      const okLogs = (Array.isArray(it.logs) ? it.logs : []).filter((l) => l.status === 'ok');
+      const errors = okLogs.reduce((n, l) => n + l.errors, 0);
+      const warnings = okLogs.reduce((n, l) => n + l.warnings, 0);
+      return { level: warn ? 'warn' : 'ok', headline: okLogs.length ? `오류 ${errors} · 경고 ${warnings}` : '확인 불가' };
     }));
     element.append(grid);
     note(element, '▲ 주의 기준(학생이 정한 값): CPU·메모리 90% 이상, 디스크 남은 공간 10% 미만, 꺼진 방화벽 프로필, 인터넷 연결 프로필 없음, 기록 오류 1건 이상. 주의는 점검을 권하는 표시이며 장애 판정이 아닙니다.');
