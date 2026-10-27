@@ -1,0 +1,13 @@
+# 비밀값·로컬 설정은 커밋하지 않습니다.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+native.json
+sdp-host.json
+# 설치·실행 산출물
+node_modules/
+*.log
+bundle-notes.json
+artifacts/submission.json
